@@ -1,0 +1,2 @@
+# zips all necessary code files only, ignoring others:
+zip -r project.zip . -x "**/node_modules/*" -x ".git/*" -x "project.zip" -x "prompt.local" -x "zip_for_prompt.sh" -x ".gitignore" -x "**/yarn.lock" -x ".DS_Store"
