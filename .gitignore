@@ -1,0 +1,17 @@
+build/
+dist/
+node_modules/
+docs/
+tests/
+
+.env*
+.cache
+.cache/
+*.zip
+
+.DS_Store
+
+yarn.lock
+package-lock.json
+
+prompt.local
