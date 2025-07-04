@@ -1,0 +1,38 @@
+// Dark theme variables
+.dark-theme {
+    // Primary colors
+    --color-primary: #60a5fa;
+    --color-primary-hover: #3b82f6;
+    --color-primary-light: #1e3a8a;
+    --color-secondary: #9ca3af;
+
+    // Background colors
+    --color-background: #111827;
+    --color-surface: #1f2937;
+    --color-surface-hover: #374151;
+
+    // Text colors
+    --color-text: #f9fafb;
+    --color-text-secondary: #d1d5db;
+    --color-text-muted: #9ca3af;
+
+    // Border colors
+    --color-border: #374151;
+    --color-border-hover: #4b5563;
+
+    // State colors
+    --color-success: #34d399;
+    --color-warning: #fbbf24;
+    --color-error: #f87171;
+    --color-info: #60a5fa;
+
+    // Special colors
+    --color-accent: #fbbf24;
+    --color-overlay: rgba(0, 0, 0, 0.7);
+
+    // Shadows (more subtle in dark theme)
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -1px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.4);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.5);
+}

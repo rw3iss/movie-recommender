@@ -1,0 +1,93 @@
+@import "../variables";
+@import "../mixins";
+
+.search-box {
+    position: relative;
+    width: 100%;
+}
+
+.search-type-selector {
+    display: flex;
+    gap: $spacing-xs;
+    margin-bottom: $spacing-md;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.type-radio {
+    position: relative;
+    cursor: pointer;
+
+    input[type="radio"] {
+        position: absolute;
+        opacity: 0;
+        width: 0;
+        height: 0;
+    }
+
+    span {
+        display: inline-flex;
+        align-items: center;
+        padding: $spacing-xs $spacing-lg;
+        background-color: var(--color-surface);
+        border: 1px solid var(--color-border);
+        border-radius: $radius-full;
+        font-size: $font-sm;
+        font-weight: $font-medium;
+        color: var(--color-text-secondary);
+        transition: all $duration-fast ease;
+
+        &:hover {
+            border-color: var(--color-primary);
+            color: var(--color-primary);
+        }
+    }
+
+    &.active span,
+    input[type="radio"]:checked + span {
+        background-color: var(--color-primary);
+        border-color: var(--color-primary);
+        color: white;
+    }
+
+    input[type="radio"]:focus-visible + span {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+}
+
+.search-input-container {
+    position: relative;
+    display: flex;
+    gap: $spacing-sm;
+}
+
+.search-input {
+    flex: 1;
+    padding: $spacing-md $spacing-lg;
+    background-color: var(--color-surface);
+    border: 2px solid var(--color-border);
+    border-radius: $radius-lg;
+    font-size: $font-base;
+    color: var(--color-text);
+    transition: all $duration-fast ease;
+
+    &::placeholder {
+        color: var(--color-text-muted);
+    }
+
+    &:hover {
+        border-color: var(--color-border-hover);
+    }
+
+    &:focus {
+        outline: none;
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 3px rgba(var(--color-primary), 0.1);
+    }
+}
+
+.advanced-button {
+    @include button-secondary;
+    white-space: nowrap;
+}

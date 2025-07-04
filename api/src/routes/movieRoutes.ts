@@ -5,7 +5,7 @@ import { CacheService } from "../services/CacheService";
 import { TMDBService } from "../services/TMDBService";
 import { DatabaseService } from "../services/DatabaseService";
 import { MovieController } from "../controllers/MovieController";
-import { RecommendationEngine } from "../services/RecommendationEngine";
+import { RecommendationEngine } from "../services/engine/RecommendationEngine";
 import {
     MovieSearchParams,
     MovieDetailsParams,

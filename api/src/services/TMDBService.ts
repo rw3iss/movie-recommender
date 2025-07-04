@@ -1,4 +1,5 @@
-import axios, { AxiosResponse } from "axios";
+import axios, { AxiosInstance, AxiosResponse } from "axios";
+import { config } from "../config";
 import { Movie, Actor, Director, ActorMovie, DirectorMovie } from "../types";
 
 interface TMDBMovieResponse {
@@ -35,12 +36,22 @@ interface TMDBCreditsResponse {
         id: number;
         name: string;
         character: string;
+        order: number;
+        profile_path?: string;
     }>;
     crew: Array<{
         id: number;
         name: string;
         job: string;
+        department: string;
     }>;
+}
+
+interface TMDBSearchResponse<T> {
+    page: number;
+    results: T[];
+    total_pages: number;
+    total_results: number;
 }
 
 /**
@@ -48,26 +59,38 @@ interface TMDBCreditsResponse {
  * Uses The Movie Database (TMDB) API for comprehensive movie information
  */
 export class TMDBService {
-    private apiKey: string;
-    private readAccessToken: string;
-    private baseUrl: string = "https://api.themoviedb.org/3";
+    private axiosInstance: AxiosInstance;
     private imageBaseUrl: string = "https://image.tmdb.org/t/p/w500";
+    private backdropBaseUrl: string = "https://image.tmdb.org/t/p/w1280";
     private cache: Map<string, { data: any; timestamp: number }> = new Map();
     private cacheTimeout: number = 1000 * 60 * 60; // 1 hour
 
-    constructor(apiKey: string, readAccessToken: string) {
-        this.apiKey = apiKey;
-        this.readAccessToken = readAccessToken;
-    }
+    constructor() {
+        this.axiosInstance = axios.create({
+            baseURL: "https://api.themoviedb.org/3",
+            timeout: 10000,
+            headers: {
+                Authorization: `Bearer ${config.TMDB_READ_ACCESS_TOKEN}`,
+                "Content-Type": "application/json;charset=utf-8",
+            },
+        });
 
-    /**
-     * Get authorization headers for TMDB API
-     */
-    private getAuthHeaders(): Record<string, string> {
-        return {
-            Authorization: `Bearer ${this.readAccessToken}`,
-            "Content-Type": "application/json;charset=utf-8",
-        };
+        // Add response interceptor for error handling
+        this.axiosInstance.interceptors.response.use(
+            (response) => response,
+            (error) => {
+                if (error.response?.status === 404) {
+                    return Promise.reject(new Error("Resource not found"));
+                }
+                if (error.response?.status === 401) {
+                    return Promise.reject(new Error("Invalid TMDB API credentials"));
+                }
+                if (error.response?.status === 429) {
+                    return Promise.reject(new Error("TMDB API rate limit exceeded"));
+                }
+                return Promise.reject(error);
+            }
+        );
     }
 
     /**
@@ -79,18 +102,19 @@ export class TMDBService {
         if (cached) return cached;
 
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/search/movie`, {
-                headers: this.getAuthHeaders(),
-                params: {
-                    query: query,
-                    page: page,
-                    include_adult: false,
-                    language: "en-US",
-                },
-                timeout: 10000,
-            });
+            const response: AxiosResponse<TMDBSearchResponse<TMDBMovieResponse>> = await this.axiosInstance.get(
+                "/search/movie",
+                {
+                    params: {
+                        query,
+                        page,
+                        include_adult: false,
+                        language: "en-US",
+                    },
+                }
+            );
 
-            const movies = response.data.results.map((movie: any) => this.formatMovieSearchResult(movie));
+            const movies = response.data.results.map((movie) => this.formatMovieSearchResult(movie));
             this.setCache(cacheKey, movies);
             return movies;
         } catch (error) {
@@ -103,9 +127,11 @@ export class TMDBService {
      */
     async searchMoviesByActor(actorName: string): Promise<Movie[]> {
         try {
+            // First, search for the actor
             const actors = await this.searchActors(actorName);
             if (actors.length === 0) return [];
 
+            // Get the first actor's movies
             const actor = actors[0];
             const movies = await this.getActorMovies(actor.id);
 
@@ -132,9 +158,11 @@ export class TMDBService {
      */
     async searchMoviesByDirector(directorName: string): Promise<Movie[]> {
         try {
+            // First, search for the director
             const directors = await this.searchDirectors(directorName);
             if (directors.length === 0) return [];
 
+            // Get the first director's movies
             const director = directors[0];
             const movies = await this.getDirectorMovies(director.id);
 
@@ -159,25 +187,27 @@ export class TMDBService {
     /**
      * Search for actors
      */
-    async searchActors(query: string): Promise<Actor[]> {
-        const cacheKey = `search_actors_${query.toLowerCase()}`;
+    async searchActors(query: string, page: number = 1): Promise<Actor[]> {
+        const cacheKey = `search_actors_${query.toLowerCase()}_${page}`;
         const cached = this.getFromCache(cacheKey);
         if (cached) return cached;
 
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/search/person`, {
-                headers: this.getAuthHeaders(),
-                params: {
-                    query: query,
-                    include_adult: false,
-                    language: "en-US",
-                },
-                timeout: 10000,
-            });
+            const response: AxiosResponse<TMDBSearchResponse<TMDBPersonResponse>> = await this.axiosInstance.get(
+                "/search/person",
+                {
+                    params: {
+                        query,
+                        page,
+                        include_adult: false,
+                        language: "en-US",
+                    },
+                }
+            );
 
             const actors = response.data.results
-                .filter((person: TMDBPersonResponse) => person.known_for_department === "Acting")
-                .map((actor: TMDBPersonResponse) => this.formatActorSearchResult(actor));
+                .filter((person) => person.known_for_department === "Acting")
+                .map((actor) => this.formatActorSearchResult(actor));
 
             this.setCache(cacheKey, actors);
             return actors;
@@ -189,25 +219,27 @@ export class TMDBService {
     /**
      * Search for directors
      */
-    async searchDirectors(query: string): Promise<Director[]> {
-        const cacheKey = `search_directors_${query.toLowerCase()}`;
+    async searchDirectors(query: string, page: number = 1): Promise<Director[]> {
+        const cacheKey = `search_directors_${query.toLowerCase()}_${page}`;
         const cached = this.getFromCache(cacheKey);
         if (cached) return cached;
 
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/search/person`, {
-                headers: this.getAuthHeaders(),
-                params: {
-                    query: query,
-                    include_adult: false,
-                    language: "en-US",
-                },
-                timeout: 10000,
-            });
+            const response: AxiosResponse<TMDBSearchResponse<TMDBPersonResponse>> = await this.axiosInstance.get(
+                "/search/person",
+                {
+                    params: {
+                        query,
+                        page,
+                        include_adult: false,
+                        language: "en-US",
+                    },
+                }
+            );
 
             const directors = response.data.results
-                .filter((person: TMDBPersonResponse) => person.known_for_department === "Directing")
-                .map((director: TMDBPersonResponse) => this.formatDirectorSearchResult(director));
+                .filter((person) => person.known_for_department === "Directing")
+                .map((director) => this.formatDirectorSearchResult(director));
 
             this.setCache(cacheKey, directors);
             return directors;
@@ -226,12 +258,10 @@ export class TMDBService {
 
         try {
             const [movieResponse, creditsResponse] = await Promise.all([
-                axios.get(`${this.baseUrl}/movie/${tmdbId}`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get<TMDBMovieResponse>(`/movie/${tmdbId}`, {
                     params: { language: "en-US" },
                 }),
-                axios.get(`${this.baseUrl}/movie/${tmdbId}/credits`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get<TMDBCreditsResponse>(`/movie/${tmdbId}/credits`, {
                     params: { language: "en-US" },
                 }),
             ]);
@@ -248,19 +278,21 @@ export class TMDBService {
      * Get actor details and filmography
      */
     async getActorDetails(actorId: number): Promise<{ actor: Actor; movies: ActorMovie[] }> {
+        const cacheKey = `actor_details_${actorId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
         try {
             const [personResponse, creditsResponse] = await Promise.all([
-                axios.get(`${this.baseUrl}/person/${actorId}`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get<TMDBPersonResponse>(`/person/${actorId}`, {
                     params: { language: "en-US" },
                 }),
-                axios.get(`${this.baseUrl}/person/${actorId}/movie_credits`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get(`/person/${actorId}/movie_credits`, {
                     params: { language: "en-US" },
                 }),
             ]);
 
-            return {
+            const result = {
                 actor: this.formatActorDetails(personResponse.data),
                 movies: creditsResponse.data.cast
                     .sort((a: any, b: any) => (b.vote_average || 0) - (a.vote_average || 0))
@@ -273,6 +305,9 @@ export class TMDBService {
                         tmdbId: movie.id,
                     })),
             };
+
+            this.setCache(cacheKey, result);
+            return result;
         } catch (error) {
             throw new Error(`Failed to get actor details: ${(error as Error).message}`);
         }
@@ -282,19 +317,21 @@ export class TMDBService {
      * Get director details and filmography
      */
     async getDirectorDetails(directorId: number): Promise<{ director: Director; movies: DirectorMovie[] }> {
+        const cacheKey = `director_details_${directorId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
         try {
             const [personResponse, creditsResponse] = await Promise.all([
-                axios.get(`${this.baseUrl}/person/${directorId}`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get<TMDBPersonResponse>(`/person/${directorId}`, {
                     params: { language: "en-US" },
                 }),
-                axios.get(`${this.baseUrl}/person/${directorId}/movie_credits`, {
-                    headers: this.getAuthHeaders(),
+                this.axiosInstance.get(`/person/${directorId}/movie_credits`, {
                     params: { language: "en-US" },
                 }),
             ]);
 
-            return {
+            const result = {
                 director: this.formatDirectorDetails(personResponse.data),
                 movies: creditsResponse.data.crew
                     .filter((movie: any) => movie.job === "Director")
@@ -303,11 +340,14 @@ export class TMDBService {
                     .map((movie: any) => ({
                         title: movie.title,
                         year: movie.release_date ? new Date(movie.release_date).getFullYear() : undefined,
-                        genre: undefined,
+                        genre: undefined, // Would need additional API call
                         imdbRating: movie.vote_average || "N/A",
                         tmdbId: movie.id,
                     })),
             };
+
+            this.setCache(cacheKey, result);
+            return result;
         } catch (error) {
             throw new Error(`Failed to get director details: ${(error as Error).message}`);
         }
@@ -317,20 +357,26 @@ export class TMDBService {
      * Get similar movies
      */
     async getSimilarMovies(tmdbId: number): Promise<Movie[]> {
+        const cacheKey = `similar_movies_${tmdbId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/movie/${tmdbId}/similar`, {
-                headers: this.getAuthHeaders(),
+            const response: AxiosResponse = await this.axiosInstance.get(`/movie/${tmdbId}/similar`, {
                 params: { language: "en-US", page: 1 },
             });
 
-            return response.data.results.slice(0, 5).map((movie: any) => ({
-                imdbId: `tmdb_${movie.id}`,
+            const movies = response.data.results.slice(0, 5).map((movie: any) => ({
+                imdbId: movie.imdb_id || `tmdb_${movie.id}`,
                 tmdbId: movie.id,
                 title: movie.title,
                 year: movie.release_date ? new Date(movie.release_date).getFullYear() : undefined,
                 imdbRating: movie.vote_average || undefined,
                 posterUrl: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : undefined,
             }));
+
+            this.setCache(cacheKey, movies);
+            return movies;
         } catch (error) {
             console.warn("Failed to get similar movies:", (error as Error).message);
             return [];
@@ -341,13 +387,16 @@ export class TMDBService {
      * Get actor's movie credits
      */
     async getActorMovies(actorId: number): Promise<ActorMovie[]> {
+        const cacheKey = `actor_movies_${actorId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/person/${actorId}/movie_credits`, {
-                headers: this.getAuthHeaders(),
+            const response: AxiosResponse = await this.axiosInstance.get(`/person/${actorId}/movie_credits`, {
                 params: { language: "en-US" },
             });
 
-            return response.data.cast
+            const movies = response.data.cast
                 .sort((a: any, b: any) => (b.vote_average || 0) - (a.vote_average || 0))
                 .map((movie: any) => ({
                     title: movie.title,
@@ -356,6 +405,9 @@ export class TMDBService {
                     imdbRating: movie.vote_average,
                     tmdbId: movie.id,
                 }));
+
+            this.setCache(cacheKey, movies);
+            return movies;
         } catch (error) {
             throw new Error(`Failed to get actor movies: ${(error as Error).message}`);
         }
@@ -365,13 +417,16 @@ export class TMDBService {
      * Get director's movie credits
      */
     async getDirectorMovies(directorId: number): Promise<DirectorMovie[]> {
+        const cacheKey = `director_movies_${directorId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
         try {
-            const response: AxiosResponse = await axios.get(`${this.baseUrl}/person/${directorId}/movie_credits`, {
-                headers: this.getAuthHeaders(),
+            const response: AxiosResponse = await this.axiosInstance.get(`/person/${directorId}/movie_credits`, {
                 params: { language: "en-US" },
             });
 
-            return response.data.crew
+            const movies = response.data.crew
                 .filter((movie: any) => movie.job === "Director")
                 .sort((a: any, b: any) => (b.vote_average || 0) - (a.vote_average || 0))
                 .map((movie: any) => ({
@@ -381,8 +436,116 @@ export class TMDBService {
                     imdbRating: movie.vote_average,
                     tmdbId: movie.id,
                 }));
+
+            this.setCache(cacheKey, movies);
+            return movies;
         } catch (error) {
             throw new Error(`Failed to get director movies: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Get popular movies
+     */
+    async getPopularMovies(page: number = 1): Promise<{ movies: Movie[]; totalPages: number }> {
+        const cacheKey = `popular_movies_${page}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const response: AxiosResponse = await this.axiosInstance.get("/movie/popular", {
+                params: { language: "en-US", page },
+            });
+
+            const result = {
+                movies: response.data.results.map((movie: any) => this.formatMovieSearchResult(movie)),
+                totalPages: response.data.total_pages,
+            };
+
+            this.setCache(cacheKey, result);
+            return result;
+        } catch (error) {
+            throw new Error(`Failed to get popular movies: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Get top rated movies
+     */
+    async getTopRatedMovies(page: number = 1): Promise<{ movies: Movie[]; totalPages: number }> {
+        const cacheKey = `top_rated_movies_${page}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const response: AxiosResponse = await this.axiosInstance.get("/movie/top_rated", {
+                params: { language: "en-US", page },
+            });
+
+            const result = {
+                movies: response.data.results.map((movie: any) => this.formatMovieSearchResult(movie)),
+                totalPages: response.data.total_pages,
+            };
+
+            this.setCache(cacheKey, result);
+            return result;
+        } catch (error) {
+            throw new Error(`Failed to get top rated movies: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Get upcoming movies
+     */
+    async getUpcomingMovies(page: number = 1): Promise<{ movies: Movie[]; totalPages: number }> {
+        const cacheKey = `upcoming_movies_${page}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const response: AxiosResponse = await this.axiosInstance.get("/movie/upcoming", {
+                params: { language: "en-US", page },
+            });
+
+            const result = {
+                movies: response.data.results.map((movie: any) => this.formatMovieSearchResult(movie)),
+                totalPages: response.data.total_pages,
+            };
+
+            this.setCache(cacheKey, result);
+            return result;
+        } catch (error) {
+            throw new Error(`Failed to get upcoming movies: ${(error as Error).message}`);
+        }
+    }
+
+    /**
+     * Get movie by IMDB ID
+     */
+    async getMovieByImdbId(imdbId: string): Promise<Movie | null> {
+        const cacheKey = `movie_by_imdb_${imdbId}`;
+        const cached = this.getFromCache(cacheKey);
+        if (cached) return cached;
+
+        try {
+            const response: AxiosResponse = await this.axiosInstance.get(`/find/${imdbId}`, {
+                params: {
+                    external_source: "imdb_id",
+                    language: "en-US",
+                },
+            });
+
+            if (response.data.movie_results.length > 0) {
+                const tmdbId = response.data.movie_results[0].id;
+                const movie = await this.getMovieDetails(tmdbId);
+                this.setCache(cacheKey, movie);
+                return movie;
+            }
+
+            return null;
+        } catch (error) {
+            console.warn(`Failed to get movie by IMDB ID: ${(error as Error).message}`);
+            return null;
         }
     }
 
@@ -397,6 +560,7 @@ export class TMDBService {
             genre: undefined,
             imdbRating: movie.vote_average,
             posterUrl: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : undefined,
+            backdropUrl: movie.backdrop_path ? `${this.backdropBaseUrl}${movie.backdrop_path}` : undefined,
         };
     }
 
@@ -419,7 +583,7 @@ export class TMDBService {
             runtime: movie.runtime ? `${movie.runtime} min` : undefined,
             actors: cast,
             posterUrl: movie.poster_path ? `${this.imageBaseUrl}${movie.poster_path}` : undefined,
-            backdropUrl: movie.backdrop_path ? `${this.imageBaseUrl}${movie.backdrop_path}` : undefined,
+            backdropUrl: movie.backdrop_path ? `${this.backdropBaseUrl}${movie.backdrop_path}` : undefined,
             releaseDate: movie.release_date,
             voteCount: movie.vote_count,
             budget: movie.budget,
@@ -484,9 +648,28 @@ export class TMDBService {
             data,
             timestamp: Date.now(),
         });
+
+        // Limit cache size
+        if (this.cache.size > 1000) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
     }
 
+    /**
+     * Clear cache
+     */
     clearCache(): void {
         this.cache.clear();
+    }
+
+    /**
+     * Get cache statistics
+     */
+    getCacheStats(): { size: number; memoryUsage: number } {
+        return {
+            size: this.cache.size,
+            memoryUsage: JSON.stringify(Array.from(this.cache.values())).length,
+        };
     }
 }

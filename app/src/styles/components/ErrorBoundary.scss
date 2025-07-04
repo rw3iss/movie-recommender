@@ -1,0 +1,76 @@
+@import "../variables";
+@import "../mixins";
+
+.error-boundary {
+    min-height: 100vh;
+    @include flex-center;
+    padding: $spacing-xl;
+    background-color: var(--color-background);
+}
+
+.error-content {
+    @include card;
+    max-width: 600px;
+    text-align: center;
+    box-shadow: var(--shadow-lg);
+
+    h1 {
+        font-size: $font-3xl;
+        color: var(--color-error);
+        margin-bottom: $spacing-md;
+    }
+
+    p {
+        font-size: $font-lg;
+        color: var(--color-text-secondary);
+        margin-bottom: $spacing-xl;
+    }
+}
+
+.error-details {
+    text-align: left;
+    margin: $spacing-xl 0;
+    padding: $spacing-lg;
+    background-color: var(--color-surface-hover);
+    border-radius: $radius-md;
+    font-size: $font-sm;
+
+    summary {
+        cursor: pointer;
+        font-weight: $font-medium;
+        color: var(--color-text);
+        margin-bottom: $spacing-md;
+
+        &:hover {
+            color: var(--color-primary);
+        }
+    }
+
+    pre {
+        margin: 0;
+        padding: $spacing-md;
+        background-color: var(--color-background);
+        border-radius: $radius-sm;
+        overflow-x: auto;
+        font-family: monospace;
+        font-size: $font-sm;
+        line-height: $leading-relaxed;
+        color: var(--color-text-secondary);
+        @include custom-scrollbar;
+    }
+}
+
+.error-actions {
+    display: flex;
+    gap: $spacing-md;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.error-button {
+    @include button-primary;
+
+    &.secondary {
+        @include button-secondary;
+    }
+}

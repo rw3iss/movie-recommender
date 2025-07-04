@@ -1,0 +1,98 @@
+@import "../variables";
+@import "../mixins";
+
+.search-dropdown {
+    position: absolute;
+    top: calc(100% + $spacing-sm);
+    left: 0;
+    right: 0;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: $radius-lg;
+    box-shadow: var(--shadow-xl);
+    max-height: 400px;
+    overflow-y: auto;
+    z-index: $z-dropdown;
+    @include custom-scrollbar;
+    @include fade-in;
+
+    &.empty {
+        padding: $spacing-xl;
+        text-align: center;
+        color: var(--color-text-secondary);
+    }
+}
+
+.search-section {
+    border-bottom: 1px solid var(--color-border);
+
+    &:last-child {
+        border-bottom: none;
+    }
+
+    h4 {
+        padding: $spacing-md $spacing-lg;
+        margin: 0;
+        font-size: $font-sm;
+        font-weight: $font-semibold;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        background-color: var(--color-surface-hover);
+        position: sticky;
+        top: 0;
+        z-index: 1;
+    }
+
+    ul {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+}
+
+.search-item {
+    padding: $spacing-md $spacing-lg;
+    cursor: pointer;
+    transition: background-color $duration-fast ease;
+
+    &:hover {
+        background-color: var(--color-surface-hover);
+    }
+
+    &:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: -2px;
+    }
+}
+
+.search-item-content {
+    display: flex;
+    align-items: baseline;
+    gap: $spacing-xs;
+    flex-wrap: wrap;
+
+    strong {
+        color: var(--color-text);
+        font-weight: $font-medium;
+    }
+
+    .year {
+        color: var(--color-text-secondary);
+        font-size: $font-sm;
+    }
+
+    .director,
+    .known-for {
+        color: var(--color-text-muted);
+        font-size: $font-sm;
+        @include truncate;
+        max-width: 300px;
+    }
+
+    .rating {
+        color: var(--color-accent);
+        font-size: $font-sm;
+        font-weight: $font-medium;
+    }
+}

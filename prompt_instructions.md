@@ -4,8 +4,7 @@ This repository hosts all of the current files for the custom application you ar
 In the _requirements folder are multiple files that will list specific requirements of this application.
 Any special requirements for the application architecture or technology stack for both the frontend app and backend api will be mentioned in the file "architecture.md" under the _requirements folder, if it exists. Otherwise always use Typescript with either React or fastify.
 
-Any code created should be fully working Typescript, using well-architected patterns, and preferably S.O.L.I.D. principles whenever possible. It should be enterprise-grade code, but the syntax should be kept as brief as possible.
-Comments should be included but only to describe complex operations.
+Any code created should be fully working Typescript, using well-architected patterns, and preferably S.O.L.I.D. principles whenever possible. It should be enterprise-grade code, but the syntax should be kept as brief as possible. All typescript classes and methods should be strongly typed and well-defined, if possible. Comments should be included inside of blocks, but only to describe complex operations.
 
 Any API methods should include js-doc /** style block comments above it.
 

@@ -1,152 +1,15 @@
-import { Database } from "sqlite3";
-import { promisify } from "util";
-import * as path from "path";
-import * as fs from "fs";
-import {
-    Movie,
-    DatabaseMovie,
-    UserRating,
-    DatabaseUserRating,
-    UserList,
-    DatabaseUserList,
-    ListItem,
-    DatabaseListItem,
-} from "../types";
+import { Pool } from "pg";
+import { Movie, UserRating, UserList, ListItem } from "../types";
 
 /**
  * Database service following Single Responsibility Principle
- * Handles all database operations with SQLite using TypeScript
+ * Handles all database operations with PostgreSQL
  */
 export class DatabaseService {
-    private db: Database | null = null;
-    private dbPath: string;
-
-    constructor(dbPath: string = "./data/movies.db") {
-        this.dbPath = dbPath;
-    }
-
-    async initialize(): Promise<void> {
-        // Ensure data directory exists
-        const dataDir = path.dirname(this.dbPath);
-        if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true });
-        }
-
-        // Open database connection
-        this.db = new Database(this.dbPath);
-
-        // Promisify database methods
-        const run = promisify(this.db.run.bind(this.db));
-        const get = promisify(this.db.get.bind(this.db));
-        const all = promisify(this.db.all.bind(this.db));
-
-        // Attach promisified methods
-        (this.db as any).runAsync = run;
-        (this.db as any).getAsync = get;
-        (this.db as any).allAsync = all;
-
-        // Create tables
-        await this.createTables();
-    }
-
-    private async createTables(): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        // Movies table
-        await (this.db as any).runAsync(`
-      CREATE TABLE IF NOT EXISTS movies (
-        imdb_id TEXT PRIMARY KEY,
-        tmdb_id INTEGER,
-        title TEXT NOT NULL,
-        year INTEGER,
-        genre TEXT,
-        director TEXT,
-        plot TEXT,
-        imdb_rating REAL,
-        runtime TEXT,
-        actors TEXT,
-        poster_url TEXT,
-        backdrop_url TEXT,
-        release_date TEXT,
-        vote_count INTEGER,
-        budget INTEGER,
-        revenue INTEGER,
-        homepage TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-        // User ratings table
-        await (this.db as any).runAsync(`
-      CREATE TABLE IF NOT EXISTS user_ratings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        imdb_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 10),
-        review TEXT,
-        date_rated DATETIME NOT NULL,
-        source TEXT DEFAULT 'manual',
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (imdb_id) REFERENCES movies (imdb_id)
-      )
-    `);
-
-        // User lists table
-        await (this.db as any).runAsync(`
-      CREATE TABLE IF NOT EXISTS user_lists (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        description TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-        // List items table
-        await (this.db as any).runAsync(`
-      CREATE TABLE IF NOT EXISTS list_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        list_id INTEGER NOT NULL,
-        item_type TEXT NOT NULL CHECK (item_type IN ('movie', 'actor', 'director')),
-        item_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        subtitle TEXT,
-        image_url TEXT,
-        added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (list_id) REFERENCES user_lists (id) ON DELETE CASCADE,
-        UNIQUE(list_id, item_type, item_id)
-      )
-    `);
-
-        // User preferences table
-        await (this.db as any).runAsync(`
-      CREATE TABLE IF NOT EXISTS user_preferences (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        preference_key TEXT NOT NULL UNIQUE,
-        preference_value TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-        // Create indexes for better performance
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_movies_genre ON movies (genre)`);
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_movies_year ON movies (year)`);
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_movies_director ON movies (director)`);
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_movies_tmdb_id ON movies (tmdb_id)`);
-        await (this.db as any).runAsync(
-            `CREATE INDEX IF NOT EXISTS idx_user_ratings_imdb_id ON user_ratings (imdb_id)`
-        );
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_user_ratings_rating ON user_ratings (rating)`);
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_list_items_list_id ON list_items (list_id)`);
-        await (this.db as any).runAsync(`CREATE INDEX IF NOT EXISTS idx_list_items_type ON list_items (item_type)`);
-    }
+    constructor(private pool: Pool) {}
 
     // Movie operations
     async saveMovie(movieData: Movie): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
         const {
             imdbId,
             tmdbId,
@@ -167,24 +30,36 @@ export class DatabaseService {
             homepage,
         } = movieData;
 
-        await (this.db as any).runAsync(
+        await this.pool.query(
             `
-      INSERT OR REPLACE INTO movies
-      (imdb_id, tmdb_id, title, year, genre, director, plot, imdb_rating, runtime, actors,
-       poster_url, backdrop_url, release_date, vote_count, budget, revenue, homepage, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    `,
+            INSERT INTO movies
+            (imdb_id, tmdb_id, title, year, plot, imdb_rating, runtime,
+             poster_url, backdrop_url, release_date, vote_count, budget, revenue, homepage)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            ON CONFLICT (imdb_id) DO UPDATE SET
+                tmdb_id = EXCLUDED.tmdb_id,
+                title = EXCLUDED.title,
+                year = EXCLUDED.year,
+                plot = EXCLUDED.plot,
+                imdb_rating = EXCLUDED.imdb_rating,
+                runtime = EXCLUDED.runtime,
+                poster_url = EXCLUDED.poster_url,
+                backdrop_url = EXCLUDED.backdrop_url,
+                release_date = EXCLUDED.release_date,
+                vote_count = EXCLUDED.vote_count,
+                budget = EXCLUDED.budget,
+                revenue = EXCLUDED.revenue,
+                homepage = EXCLUDED.homepage,
+                updated_at = CURRENT_TIMESTAMP
+            `,
             [
                 imdbId,
                 tmdbId,
                 title,
                 year,
-                genre,
-                director,
                 plot,
                 imdbRating,
                 runtime,
-                actors,
                 posterUrl,
                 backdropUrl,
                 releaseDate,
@@ -194,393 +69,593 @@ export class DatabaseService {
                 homepage,
             ]
         );
+
+        // Handle genres
+        if (genre) {
+            const genres = genre.split(",").map((g) => g.trim());
+            for (const genreName of genres) {
+                // Insert genre if not exists
+                await this.pool.query("INSERT INTO genres (name) VALUES ($1) ON CONFLICT (name) DO NOTHING", [
+                    genreName,
+                ]);
+
+                // Link movie to genre
+                await this.pool.query(
+                    `
+                    INSERT INTO movie_genres (movie_id, genre_id)
+                    SELECT $1, id FROM genres WHERE name = $2
+                    ON CONFLICT DO NOTHING
+                    `,
+                    [imdbId, genreName]
+                );
+            }
+        }
+
+        // Handle director
+        if (director) {
+            await this.savePersonAndLinkToMovie(director, imdbId, "Director");
+        }
+
+        // Handle actors
+        if (actors) {
+            const actorList = actors.split(",").map((a) => a.trim());
+            for (let i = 0; i < actorList.length; i++) {
+                await this.savePersonAndLinkToMovie(actorList[i], imdbId, "Actor", i);
+            }
+        }
     }
 
-    async getMovie(imdbId: string): Promise<Movie | null> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const row: DatabaseMovie = await (this.db as any).getAsync(
-            `
-      SELECT * FROM movies WHERE imdb_id = ?
-    `,
-            [imdbId]
+    private async savePersonAndLinkToMovie(
+        name: string,
+        movieId: string,
+        role: "Director" | "Actor",
+        order?: number
+    ): Promise<void> {
+        // Insert person if not exists
+        const personResult = await this.pool.query(
+            "INSERT INTO people (name) VALUES ($1) ON CONFLICT (name) DO UPDATE SET name = $1 RETURNING id",
+            [name]
         );
+        const personId = personResult.rows[0].id;
 
-        return row ? this.mapDatabaseMovieToMovie(row) : null;
-    }
-
-    async getAllMovies(): Promise<Movie[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseMovie[] = await (this.db as any).allAsync(`
-      SELECT * FROM movies ORDER BY title
-    `);
-
-        return rows.map((row) => this.mapDatabaseMovieToMovie(row));
-    }
-
-    async searchMovies(query: string): Promise<Movie[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseMovie[] = await (this.db as any).allAsync(
-            `
-      SELECT * FROM movies
-      WHERE title LIKE ? OR genre LIKE ? OR plot LIKE ?
-      ORDER BY title
-      LIMIT 50
-    `,
-            [`%${query}%`, `%${query}%`, `%${query}%`]
-        );
-
-        return rows.map((row) => this.mapDatabaseMovieToMovie(row));
-    }
-
-    async searchMoviesByDirector(query: string): Promise<Movie[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseMovie[] = await (this.db as any).allAsync(
-            `
-      SELECT * FROM movies
-      WHERE director LIKE ?
-      ORDER BY title
-      LIMIT 50
-    `,
-            [`%${query}%`]
-        );
-
-        return rows.map((row) => this.mapDatabaseMovieToMovie(row));
-    }
-
-    async searchMoviesByActor(query: string): Promise<Movie[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseMovie[] = await (this.db as any).allAsync(
-            `
-      SELECT * FROM movies
-      WHERE actors LIKE ?
-      ORDER BY title
-      LIMIT 50
-    `,
-            [`%${query}%`]
-        );
-
-        return rows.map((row) => this.mapDatabaseMovieToMovie(row));
-    }
-
-    // User rating operations
-    async saveUserRating(ratingData: UserRating): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const { imdbId, title, rating, review, dateRated, source = "manual" } = ratingData;
-
-        // First, try to update existing rating
-        const existingRating = await (this.db as any).getAsync(
-            `
-      SELECT id FROM user_ratings WHERE imdb_id = ?
-    `,
-            [imdbId]
-        );
-
-        if (existingRating) {
-            await (this.db as any).runAsync(
+        if (role === "Director") {
+            await this.pool.query(
                 `
-        UPDATE user_ratings
-        SET rating = ?, review = ?, date_rated = ?, source = ?
-        WHERE imdb_id = ?
-      `,
-                [rating, review, dateRated, source, imdbId]
+                INSERT INTO movie_crew (movie_id, person_id, department, job)
+                VALUES ($1, $2, 'Directing', 'Director')
+                ON CONFLICT DO NOTHING
+                `,
+                [movieId, personId]
             );
         } else {
-            await (this.db as any).runAsync(
+            await this.pool.query(
                 `
-        INSERT INTO user_ratings (imdb_id, title, rating, review, date_rated, source)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `,
-                [imdbId, title, rating, review, dateRated, source]
+                INSERT INTO movie_cast (movie_id, person_id, character_name, cast_order)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT DO NOTHING
+                `,
+                [movieId, personId, "Unknown", order || 999]
             );
         }
     }
 
-    async getUserRatings(): Promise<UserRating[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseUserRating[] = await (this.db as any).allAsync(`
-      SELECT ur.*, m.genre, m.director, m.year, m.plot
-      FROM user_ratings ur
-      LEFT JOIN movies m ON ur.imdb_id = m.imdb_id
-      ORDER BY ur.date_rated DESC
-    `);
-
-        return rows.map((row) => this.mapDatabaseUserRatingToUserRating(row));
-    }
-
-    async getUserRating(imdbId: string): Promise<UserRating | null> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const row: DatabaseUserRating = await (this.db as any).getAsync(
+    async getMovie(imdbId: string): Promise<Movie | null> {
+        const result = await this.pool.query(
             `
-      SELECT ur.*, m.genre, m.director, m.year, m.plot
-      FROM user_ratings ur
-      LEFT JOIN movies m ON ur.imdb_id = m.imdb_id
-      WHERE ur.imdb_id = ?
-    `,
+            SELECT m.*,
+                   array_agg(DISTINCT g.name) as genres,
+                   array_agg(DISTINCT CASE WHEN mc.job = 'Director' THEN p.name END) as directors
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.id
+            LEFT JOIN movie_crew mc ON m.imdb_id = mc.movie_id AND mc.job = 'Director'
+            LEFT JOIN people p ON mc.person_id = p.id
+            WHERE m.imdb_id = $1
+            GROUP BY m.imdb_id
+            `,
             [imdbId]
         );
 
-        return row ? this.mapDatabaseUserRatingToUserRating(row) : null;
+        if (result.rows.length === 0) return null;
+
+        const row = result.rows[0];
+        return this.mapDatabaseMovieToMovie(row);
     }
 
-    async deleteUserRating(imdbId: string): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
+    async getAllMovies(): Promise<Movie[]> {
+        const result = await this.pool.query(`
+            SELECT m.*,
+                   array_agg(DISTINCT g.name) as genres,
+                   array_agg(DISTINCT CASE WHEN mc.job = 'Director' THEN p.name END) as directors
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.id
+            LEFT JOIN movie_crew mc ON m.imdb_id = mc.movie_id AND mc.job = 'Director'
+            LEFT JOIN people p ON mc.person_id = p.id
+            GROUP BY m.imdb_id
+            ORDER BY m.title
+        `);
 
-        await (this.db as any).runAsync(
+        return result.rows.map((row) => this.mapDatabaseMovieToMovie(row));
+    }
+
+    async searchMovies(query: string): Promise<Movie[]> {
+        const result = await this.pool.query(
             `
-      DELETE FROM user_ratings WHERE imdb_id = ?
-    `,
-            [imdbId]
+            SELECT m.*,
+                   array_agg(DISTINCT g.name) as genres,
+                   array_agg(DISTINCT CASE WHEN mc.job = 'Director' THEN p.name END) as directors
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.id
+            LEFT JOIN movie_crew mc ON m.imdb_id = mc.movie_id AND mc.job = 'Director'
+            LEFT JOIN people p ON mc.person_id = p.id
+            WHERE m.title ILIKE $1 OR m.plot ILIKE $1
+            GROUP BY m.imdb_id
+            ORDER BY m.title
+            LIMIT 50
+            `,
+            [`%${query}%`]
         );
+
+        return result.rows.map((row) => this.mapDatabaseMovieToMovie(row));
+    }
+
+    async searchMoviesByDirector(query: string): Promise<Movie[]> {
+        const result = await this.pool.query(
+            `
+            SELECT DISTINCT m.*,
+                   array_agg(DISTINCT g.name) as genres,
+                   array_agg(DISTINCT CASE WHEN mc.job = 'Director' THEN p.name END) as directors
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.id
+            LEFT JOIN movie_crew mc ON m.imdb_id = mc.movie_id
+            LEFT JOIN people p ON mc.person_id = p.id
+            WHERE p.name ILIKE $1 AND mc.job = 'Director'
+            GROUP BY m.imdb_id
+            ORDER BY m.title
+            LIMIT 50
+            `,
+            [`%${query}%`]
+        );
+
+        return result.rows.map((row) => this.mapDatabaseMovieToMovie(row));
+    }
+
+    async searchMoviesByActor(query: string): Promise<Movie[]> {
+        const result = await this.pool.query(
+            `
+            SELECT DISTINCT m.*,
+                   array_agg(DISTINCT g.name) as genres,
+                   array_agg(DISTINCT CASE WHEN mc.job = 'Director' THEN pd.name END) as directors
+            FROM movies m
+            LEFT JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+            LEFT JOIN genres g ON mg.genre_id = g.id
+            LEFT JOIN movie_cast mca ON m.imdb_id = mca.movie_id
+            LEFT JOIN people pa ON mca.person_id = pa.id
+            LEFT JOIN movie_crew mc ON m.imdb_id = mc.movie_id AND mc.job = 'Director'
+            LEFT JOIN people pd ON mc.person_id = pd.id
+            WHERE pa.name ILIKE $1
+            GROUP BY m.imdb_id
+            ORDER BY m.title
+            LIMIT 50
+            `,
+            [`%${query}%`]
+        );
+
+        return result.rows.map((row) => this.mapDatabaseMovieToMovie(row));
+    }
+
+    // User rating operations
+    async saveUserRating(userId: string, ratingData: UserRating): Promise<void> {
+        const { imdbId, title, rating, review, dateRated } = ratingData;
+
+        await this.pool.query(
+            `
+            INSERT INTO user_ratings (user_id, movie_id, rating, review, date_rated)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, movie_id) DO UPDATE SET
+                rating = EXCLUDED.rating,
+                review = EXCLUDED.review,
+                date_rated = EXCLUDED.date_rated,
+                updated_at = CURRENT_TIMESTAMP
+            `,
+            [userId, imdbId, rating, review, dateRated || new Date()]
+        );
+    }
+
+    async getUserRatings(userId: string): Promise<UserRating[]> {
+        const result = await this.pool.query(
+            `
+            SELECT ur.*, m.title
+            FROM user_ratings ur
+            JOIN movies m ON ur.movie_id = m.imdb_id
+            WHERE ur.user_id = $1
+            ORDER BY ur.date_rated DESC
+            `,
+            [userId]
+        );
+
+        return result.rows.map((row) => ({
+            id: row.id,
+            imdbId: row.movie_id,
+            title: row.title,
+            rating: parseFloat(row.rating),
+            review: row.review,
+            dateRated: row.date_rated,
+            createdAt: row.created_at,
+        }));
+    }
+
+    async getUserRating(userId: string, imdbId: string): Promise<UserRating | null> {
+        const result = await this.pool.query(
+            `
+            SELECT ur.*, m.title
+            FROM user_ratings ur
+            JOIN movies m ON ur.movie_id = m.imdb_id
+            WHERE ur.user_id = $1 AND ur.movie_id = $2
+            `,
+            [userId, imdbId]
+        );
+
+        if (result.rows.length === 0) return null;
+
+        const row = result.rows[0];
+        return {
+            id: row.id,
+            imdbId: row.movie_id,
+            title: row.title,
+            rating: parseFloat(row.rating),
+            review: row.review,
+            dateRated: row.date_rated,
+            createdAt: row.created_at,
+        };
+    }
+
+    async deleteUserRating(userId: string, imdbId: string): Promise<void> {
+        await this.pool.query("DELETE FROM user_ratings WHERE user_id = $1 AND movie_id = $2", [userId, imdbId]);
     }
 
     // User lists operations
-    async createUserList(name: string, description?: string): Promise<number> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const result = await (this.db as any).runAsync(
+    async createUserList(userId: string, name: string, description?: string): Promise<number> {
+        const result = await this.pool.query(
             `
-      INSERT INTO user_lists (name, description)
-      VALUES (?, ?)
-    `,
-            [name, description]
+            INSERT INTO user_lists (user_id, name, description)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            `,
+            [userId, name, description]
         );
 
-        return result.lastID;
+        return result.rows[0].id;
     }
 
-    async getUserLists(): Promise<UserList[]> {
-        if (!this.db) throw new Error("Database not initialized");
+    async getUserLists(userId: string): Promise<UserList[]> {
+        const result = await this.pool.query(
+            `
+            SELECT ul.*, COUNT(li.id) as item_count
+            FROM user_lists ul
+            LEFT JOIN list_items li ON ul.id = li.list_id
+            WHERE ul.user_id = $1
+            GROUP BY ul.id
+            ORDER BY ul.created_at DESC
+            `,
+            [userId]
+        );
 
-        const rows: DatabaseUserList[] = await (this.db as any).allAsync(`
-      SELECT ul.*, COUNT(li.id) as item_count
-      FROM user_lists ul
-      LEFT JOIN list_items li ON ul.id = li.list_id
-      GROUP BY ul.id
-      ORDER BY ul.created_at DESC
-    `);
-
-        return rows.map((row) => ({
+        return result.rows.map((row) => ({
             id: row.id,
             name: row.name,
             description: row.description,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
-            itemCount: (row as any).item_count || 0,
+            itemCount: parseInt(row.item_count),
         }));
     }
 
     async getUserList(listId: number): Promise<UserList | null> {
-        if (!this.db) throw new Error("Database not initialized");
+        const result = await this.pool.query("SELECT * FROM user_lists WHERE id = $1", [listId]);
 
-        const row: DatabaseUserList = await (this.db as any).getAsync(
-            `
-      SELECT * FROM user_lists WHERE id = ?
-    `,
-            [listId]
-        );
+        if (result.rows.length === 0) return null;
 
-        return row
-            ? {
-                  id: row.id,
-                  name: row.name,
-                  description: row.description,
-                  createdAt: row.created_at,
-                  updatedAt: row.updated_at,
-              }
-            : null;
+        const row = result.rows[0];
+        return {
+            id: row.id,
+            name: row.name,
+            description: row.description,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+        };
     }
 
     async updateUserList(listId: number, name: string, description?: string): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        await (this.db as any).runAsync(
+        await this.pool.query(
             `
-      UPDATE user_lists
-      SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `,
-            [name, description, listId]
+            UPDATE user_lists
+            SET name = $2, description = $3, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            `,
+            [listId, name, description]
         );
     }
 
     async deleteUserList(listId: number): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        await (this.db as any).runAsync(
-            `
-      DELETE FROM user_lists WHERE id = ?
-    `,
-            [listId]
-        );
+        await this.pool.query("DELETE FROM user_lists WHERE id = $1", [listId]);
     }
 
     // List items operations
     async addItemToList(listId: number, item: Omit<ListItem, "id" | "listId" | "addedAt">): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
+        // Get next position
+        const posResult = await this.pool.query(
+            "SELECT COALESCE(MAX(position), 0) + 1 as next_pos FROM list_items WHERE list_id = $1",
+            [listId]
+        );
+        const position = posResult.rows[0].next_pos;
 
-        await (this.db as any).runAsync(
+        await this.pool.query(
             `
-      INSERT OR REPLACE INTO list_items (list_id, item_type, item_id, title, subtitle, image_url)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `,
-            [listId, item.itemType, item.itemId, item.title, item.subtitle, item.imageUrl]
+            INSERT INTO list_items (list_id, item_type, item_id, position, notes)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (list_id, item_type, item_id) DO UPDATE SET
+                notes = EXCLUDED.notes
+            `,
+            [listId, item.itemType, item.itemId, position, item.subtitle]
         );
     }
 
     async getListItems(listId: number): Promise<ListItem[]> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const rows: DatabaseListItem[] = await (this.db as any).allAsync(
+        const result = await this.pool.query(
             `
-      SELECT * FROM list_items WHERE list_id = ? ORDER BY added_at DESC
-    `,
+            SELECT * FROM list_items
+            WHERE list_id = $1
+            ORDER BY position, added_at DESC
+            `,
             [listId]
         );
 
-        return rows.map((row) => ({
+        return result.rows.map((row) => ({
             id: row.id,
             listId: row.list_id,
             itemType: row.item_type,
             itemId: row.item_id,
-            title: row.title,
-            subtitle: row.subtitle,
-            imageUrl: row.image_url,
+            title: row.item_id, // This would need to be joined with actual data
+            subtitle: row.notes,
+            imageUrl: undefined,
             addedAt: row.added_at,
         }));
     }
 
     async removeItemFromList(listId: number, itemType: string, itemId: string): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        await (this.db as any).runAsync(
-            `
-      DELETE FROM list_items WHERE list_id = ? AND item_type = ? AND item_id = ?
-    `,
-            [listId, itemType, itemId]
-        );
+        await this.pool.query("DELETE FROM list_items WHERE list_id = $1 AND item_type = $2 AND item_id = $3", [
+            listId,
+            itemType,
+            itemId,
+        ]);
     }
 
     // User preferences operations
-    async saveUserPreference(key: string, value: any): Promise<void> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        await (this.db as any).runAsync(
+    async saveUserPreference(userId: string, key: string, value: any): Promise<void> {
+        await this.pool.query(
             `
-      INSERT OR REPLACE INTO user_preferences (preference_key, preference_value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-    `,
-            [key, JSON.stringify(value)]
+            INSERT INTO user_preferences (user_id, ${key})
+            VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET
+                ${key} = EXCLUDED.${key},
+                updated_at = CURRENT_TIMESTAMP
+            `,
+            [userId, value]
         );
     }
 
-    async getUserPreference(key: string): Promise<any> {
-        if (!this.db) throw new Error("Database not initialized");
+    async getUserPreference(userId: string, key: string): Promise<any> {
+        const result = await this.pool.query(`SELECT ${key} FROM user_preferences WHERE user_id = $1`, [userId]);
 
-        const result = await (this.db as any).getAsync(
-            `
-      SELECT preference_value FROM user_preferences WHERE preference_key = ?
-    `,
-            [key]
-        );
-
-        return result ? JSON.parse(result.preference_value) : null;
+        return result.rows.length > 0 ? result.rows[0][key] : null;
     }
 
-    async getAllUserPreferences(): Promise<Record<string, any>> {
-        if (!this.db) throw new Error("Database not initialized");
+    async getAllUserPreferences(userId: string): Promise<Record<string, any>> {
+        const result = await this.pool.query("SELECT * FROM user_preferences WHERE user_id = $1", [userId]);
 
-        const results = await (this.db as any).allAsync(`
-      SELECT preference_key, preference_value FROM user_preferences
-    `);
+        return result.rows.length > 0 ? result.rows[0] : {};
+    }
 
-        const preferences: Record<string, any> = {};
-        results.forEach((row: any) => {
-            preferences[row.preference_key] = JSON.parse(row.preference_value);
-        });
+    // User management
+    async createUser(userData: any): Promise<any> {
+        const result = await this.pool.query(
+            `
+            INSERT INTO users (email, username, password, email_verified, role)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, email, username, email_verified, role, created_at, updated_at
+            `,
+            [
+                userData.email,
+                userData.username,
+                userData.password,
+                userData.emailVerified || false,
+                userData.role || "user",
+            ]
+        );
 
-        return preferences;
+        return result.rows[0];
+    }
+
+    async findUserByEmail(email: string): Promise<any> {
+        const result = await this.pool.query("SELECT * FROM users WHERE email = $1", [email.toLowerCase()]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async findUserById(userId: string, includePassword: boolean = false): Promise<any> {
+        const query = includePassword
+            ? "SELECT * FROM users WHERE id = $1"
+            : "SELECT id, email, username, email_verified, role, created_at, updated_at FROM users WHERE id = $1";
+
+        const result = await this.pool.query(query, [userId]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async findUserByUsername(username: string): Promise<any> {
+        const result = await this.pool.query("SELECT id, email, username FROM users WHERE username = $1", [username]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async updateUser(userId: string, data: any): Promise<any> {
+        const fields = Object.keys(data)
+            .map((key, index) => `${key} = $${index + 2}`)
+            .join(", ");
+        const values = Object.values(data);
+
+        const result = await this.pool.query(
+            `
+            UPDATE users
+            SET ${fields}, updated_at = CURRENT_TIMESTAMP
+            WHERE id = $1
+            RETURNING id, email, username, email_verified, role, created_at, updated_at
+            `,
+            [userId, ...values]
+        );
+
+        return result.rows[0];
+    }
+
+    async deleteUser(userId: string): Promise<void> {
+        await this.pool.query("DELETE FROM users WHERE id = $1", [userId]);
+    }
+
+    // Token management
+    async saveRefreshToken(userId: string, token: string): Promise<void> {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + 30); // 30 days
+
+        await this.pool.query(
+            `
+            INSERT INTO refresh_tokens (user_id, token, expires_at)
+            VALUES ($1, $2, $3)
+            `,
+            [userId, token, expiresAt]
+        );
+    }
+
+    async findRefreshToken(token: string): Promise<any> {
+        const result = await this.pool.query("SELECT * FROM refresh_tokens WHERE token = $1", [token]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async deleteRefreshToken(token: string): Promise<void> {
+        await this.pool.query("DELETE FROM refresh_tokens WHERE token = $1", [token]);
+    }
+
+    async deleteAllUserRefreshTokens(userId: string): Promise<void> {
+        await this.pool.query("DELETE FROM refresh_tokens WHERE user_id = $1", [userId]);
+    }
+
+    async saveVerificationToken(userId: string, token: string, type: string): Promise<void> {
+        const expiresAt = new Date();
+        if (type === "email_verification") {
+            expiresAt.setDate(expiresAt.getDate() + 1); // 24 hours
+        } else {
+            expiresAt.setHours(expiresAt.getHours() + 1); // 1 hour
+        }
+
+        await this.pool.query(
+            `
+            INSERT INTO verification_tokens (user_id, token, type, expires_at)
+            VALUES ($1, $2, $3, $4)
+            `,
+            [userId, token, type, expiresAt]
+        );
+    }
+
+    async findVerificationToken(token: string, type: string): Promise<any> {
+        const result = await this.pool.query("SELECT * FROM verification_tokens WHERE token = $1 AND type = $2", [
+            token,
+            type,
+        ]);
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async deleteVerificationToken(token: string): Promise<void> {
+        await this.pool.query("DELETE FROM verification_tokens WHERE token = $1", [token]);
+    }
+
+    // OAuth
+    async findUserByOAuth(provider: string, providerId: string): Promise<any> {
+        const result = await this.pool.query(
+            `
+            SELECT u.* FROM users u
+            JOIN oauth_accounts oa ON u.id = oa.user_id
+            WHERE oa.provider = $1 AND oa.provider_account_id = $2
+            `,
+            [provider, providerId]
+        );
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    }
+
+    async linkOAuthAccount(userId: string, provider: string, providerId: string): Promise<void> {
+        await this.pool.query(
+            `
+            INSERT INTO oauth_accounts (user_id, provider, provider_account_id)
+            VALUES ($1, $2, $3)
+            ON CONFLICT DO NOTHING
+            `,
+            [userId, provider, providerId]
+        );
     }
 
     // Statistics
     async getStatistics(): Promise<any> {
-        if (!this.db) throw new Error("Database not initialized");
-
-        const totalMovies = await (this.db as any).getAsync(`SELECT COUNT(*) as count FROM movies`);
-        const totalRatings = await (this.db as any).getAsync(`SELECT COUNT(*) as count FROM user_ratings`);
-        const avgRating = await (this.db as any).getAsync(`SELECT AVG(rating) as avg FROM user_ratings`);
-        const topGenres = await (this.db as any).allAsync(`
-      SELECT m.genre, COUNT(*) as count, AVG(ur.rating) as avg_rating
-      FROM user_ratings ur
-      JOIN movies m ON ur.imdb_id = m.imdb_id
-      WHERE m.genre IS NOT NULL
-      GROUP BY m.genre
-      ORDER BY count DESC
-      LIMIT 5
-    `);
+        const [movies, ratings, avgRating, topGenres] = await Promise.all([
+            this.pool.query("SELECT COUNT(*) as count FROM movies"),
+            this.pool.query("SELECT COUNT(*) as count FROM user_ratings"),
+            this.pool.query("SELECT AVG(rating) as avg FROM user_ratings"),
+            this.pool.query(`
+                SELECT g.name as genre, COUNT(*) as count, AVG(ur.rating) as avg_rating
+                FROM user_ratings ur
+                JOIN movies m ON ur.movie_id = m.imdb_id
+                JOIN movie_genres mg ON m.imdb_id = mg.movie_id
+                JOIN genres g ON mg.genre_id = g.id
+                GROUP BY g.name
+                ORDER BY count DESC
+                LIMIT 5
+            `),
+        ]);
 
         return {
-            totalMovies: totalMovies.count,
-            totalRatings: totalRatings.count,
-            averageRating: avgRating.avg ? parseFloat(avgRating.avg).toFixed(1) : 0,
-            topGenres,
+            totalMovies: parseInt(movies.rows[0].count),
+            totalRatings: parseInt(ratings.rows[0].count),
+            averageRating: avgRating.rows[0].avg ? parseFloat(avgRating.rows[0].avg).toFixed(1) : 0,
+            topGenres: topGenres.rows,
         };
     }
 
-    async close(): Promise<void> {
-        if (this.db) {
-            await new Promise<void>((resolve, reject) => {
-                this.db!.close((err) => {
-                    if (err) reject(err);
-                    else resolve();
-                });
-            });
-            this.db = null;
-        }
-    }
-
-    // Helper methods for mapping database objects to domain objects
-    private mapDatabaseMovieToMovie(dbMovie: DatabaseMovie): Movie {
+    // Helper methods
+    private mapDatabaseMovieToMovie(row: any): Movie {
         return {
-            imdbId: dbMovie.imdb_id,
-            tmdbId: dbMovie.tmdb_id,
-            title: dbMovie.title,
-            year: dbMovie.year,
-            genre: dbMovie.genre,
-            director: dbMovie.director,
-            plot: dbMovie.plot,
-            imdbRating: dbMovie.imdb_rating,
-            runtime: dbMovie.runtime,
-            actors: dbMovie.actors,
-            posterUrl: dbMovie.poster_url,
-            backdropUrl: dbMovie.backdrop_url,
-            releaseDate: dbMovie.release_date,
-            voteCount: dbMovie.vote_count,
-            budget: dbMovie.budget,
-            revenue: dbMovie.revenue,
-            homepage: dbMovie.homepage,
-            createdAt: dbMovie.created_at,
-            updatedAt: dbMovie.updated_at,
-        };
-    }
-
-    private mapDatabaseUserRatingToUserRating(dbRating: DatabaseUserRating): UserRating {
-        return {
-            id: dbRating.id,
-            imdbId: dbRating.imdb_id,
-            title: dbRating.title,
-            rating: dbRating.rating,
-            review: dbRating.review,
-            dateRated: dbRating.date_rated,
-            source: dbRating.source,
-            createdAt: dbRating.created_at,
+            imdbId: row.imdb_id,
+            tmdbId: row.tmdb_id,
+            title: row.title,
+            year: row.year,
+            genre: row.genres ? row.genres.filter((g: any) => g).join(", ") : undefined,
+            director: row.directors ? row.directors.find((d: any) => d) : undefined,
+            plot: row.plot,
+            imdbRating: row.imdb_rating ? parseFloat(row.imdb_rating) : undefined,
+            runtime: row.runtime,
+            actors: row.actors,
+            posterUrl: row.poster_url,
+            backdropUrl: row.backdrop_url,
+            releaseDate: row.release_date,
+            voteCount: row.vote_count,
+            budget: row.budget,
+            revenue: row.revenue,
+            homepage: row.homepage,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
         };
     }
 }

@@ -1,0 +1,187 @@
+// SCSS Mixins
+
+// Responsive breakpoints
+@mixin sm {
+    @media (min-width: $breakpoint-sm) {
+        @content;
+    }
+}
+
+@mixin md {
+    @media (min-width: $breakpoint-md) {
+        @content;
+    }
+}
+
+@mixin lg {
+    @media (min-width: $breakpoint-lg) {
+        @content;
+    }
+}
+
+@mixin xl {
+    @media (min-width: $breakpoint-xl) {
+        @content;
+    }
+}
+
+@mixin max-sm {
+    @media (max-width: #{$breakpoint-sm - 1px}) {
+        @content;
+    }
+}
+
+@mixin max-md {
+    @media (max-width: #{$breakpoint-md - 1px}) {
+        @content;
+    }
+}
+
+// Flexbox helpers
+@mixin flex-center {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+@mixin flex-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+// Card styles
+@mixin card {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: $radius-lg;
+    padding: $spacing-lg;
+    transition: all $duration-normal ease;
+
+    &:hover {
+        border-color: var(--color-border-hover);
+        box-shadow: var(--shadow-md);
+    }
+}
+
+// Button styles
+@mixin button-base {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: $spacing-sm $spacing-lg;
+    font-size: $font-base;
+    font-weight: $font-medium;
+    border-radius: $radius-md;
+    transition: all $duration-fast ease;
+    cursor: pointer;
+    text-decoration: none;
+    border: none;
+    outline: none;
+
+    &:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+
+    &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+}
+
+@mixin button-primary {
+    @include button-base;
+    background-color: var(--color-primary);
+    color: white;
+
+    &:hover:not(:disabled) {
+        background-color: var(--color-primary-hover);
+    }
+}
+
+@mixin button-secondary {
+    @include button-base;
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+
+    &:hover:not(:disabled) {
+        background-color: var(--color-surface-hover);
+        border-color: var(--color-border-hover);
+    }
+}
+
+// Text truncation
+@mixin truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@mixin line-clamp($lines: 2) {
+    display: -webkit-box;
+    -webkit-line-clamp: $lines;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+// Focus styles
+@mixin focus-ring {
+    &:focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 2px;
+    }
+}
+
+// Scrollbar styles
+@mixin custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+
+    &::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background-color: var(--color-border);
+        border-radius: $radius-full;
+
+        &:hover {
+            background-color: var(--color-border-hover);
+        }
+    }
+}
+
+// Animation
+@mixin fade-in($duration: $duration-normal) {
+    animation: fadeIn $duration ease;
+}
+
+@mixin slide-up($duration: $duration-normal) {
+    animation: slideUp $duration ease;
+}
+
+// Aspect ratio
+@mixin aspect-ratio($width, $height) {
+    position: relative;
+
+    &::before {
+        content: "";
+        display: block;
+        padding-bottom: percentage($height / $width);
+    }
+
+    > * {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+    }
+}

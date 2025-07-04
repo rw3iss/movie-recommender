@@ -1,5 +1,5 @@
 import { IRecommendationStrategy } from "./interfaces/IRecommendationStrategy";
-import { Movie, UserRating, Recommendation, UserPreferences } from "../types";
+import { Movie, UserRating, Recommendation, UserPreferences } from "../../types";
 
 /**
  * Recommendation Engine following Strategy Pattern and Dependency Inversion Principle

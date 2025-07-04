@@ -1,4 +1,4 @@
-import { Movie, UserRating, Recommendation, UserPreferences } from "../../types";
+import { Movie, UserRating, Recommendation, UserPreferences } from "../../../types";
 
 /**
  * Interface for recommendation strategies following Interface Segregation Principle
